@@ -51,7 +51,7 @@ jobs:
       - name: Validate submission
         env:
           VALIDATION_REPORT: validation-report.md
-        run: node scripts/validate-pr.mjs .pr-head/data changed-files.txt
+        run: node scripts/validate-pr.mjs .pr-head/data changed-files.txt data
 
       - name: Comment validation result
         if: always() && hashFiles('validation-report.md') != ''
