@@ -1,0 +1,7 @@
+node_modules/
+.pr-head/
+changed-files.txt
+merge-base.txt
+validation-report.md
+.DS_Store
+Thumbs.db
