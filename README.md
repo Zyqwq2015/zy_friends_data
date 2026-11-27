@@ -39,7 +39,7 @@
 
 ## 自动检查内容
 
-- 只允许新增一个 `data/*.json` 文件，不能修改工作流或其他文件。
+- 每次只能新增、更新或删除一个 `data/*.json` 文件，不能修改工作流或其他文件。
 - JSON 必须且只能包含 `name`、`avatar`、`description`、`url` 四个字段。
 - 站点和头像必须使用 HTTPS，并且能够正常访问。
 - 文件名必须与站点域名一致，例如 `https://blog.example.com/` 对应 `data/blog.example.com.json`。
