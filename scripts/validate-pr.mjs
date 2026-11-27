@@ -6,6 +6,7 @@ import { buildFriendsIndex, readFriendFiles } from './friend-data.mjs'
 
 const dataDir = resolve(process.argv[2] || '.pr-head/data')
 const changedFilesPath = resolve(process.argv[3] || 'changed-files.txt')
+const baseDataDir = resolve(process.argv[4] || 'data')
 const reportPath = resolve(process.env.VALIDATION_REPORT || 'validation-report.md')
 const OUR_HOSTS = new Set(['zyqwq.cn', 'www.zyqwq.cn'])
 const USER_AGENT = 'ZyqwqFriendsValidator/1.0 (+https://www.zyqwq.cn/friend)'
@@ -274,30 +275,38 @@ function parseChangedFiles(content) {
 
 const errors = []
 const changed = parseChangedFiles(await readFile(changedFilesPath, 'utf8'))
-const changedJson = changed.filter(({ status, paths }) => status === 'A' && /^data\/[^/]+\.json$/.test(paths[0] || ''))
+const changedJson = changed.filter(({ status, paths }) => ['A', 'M', 'D'].includes(status) && /^data\/[^/]+\.json$/.test(paths[0] || ''))
 
 if (changed.length !== 1) {
   errors.push(`一次 Pull Request 只能修改一个文件，当前修改了 ${changed.length} 个`)
 } else if (changedJson.length !== 1) {
-  errors.push('本次修改必须是新增一个 data/<站点域名>.json 文件')
+  errors.push('本次修改必须是新增、更新或删除一个 data/<站点域名>.json 文件')
 }
 
 const { friends, errors: dataErrors } = await readFriendFiles(dataDir)
 errors.push(...dataErrors)
 
 if (!errors.length) {
+  const { status } = changed[0]
   const changedPath = changed[0].paths[0]
   const fileName = changedPath.slice('data/'.length)
-  const friend = friends.find((item) => new URL(item.url).hostname.toLowerCase() === fileName.slice(0, -'.json'.length))
-  if (!friend) {
-    errors.push(`没有找到 ${changedPath} 对应的有效友链`)
+
+  if (status === 'D') {
+    const { fileNames, errors: baseErrors } = await readFriendFiles(baseDataDir)
+    if (baseErrors.length) errors.push(...baseErrors)
+    if (!fileNames.includes(fileName)) errors.push(`要删除的 ${changedPath} 在目标分支中不存在`)
   } else {
-    const [backlink, avatar] = await Promise.all([
-      verifyBacklink(friend.url),
-      verifyAvatar(friend.avatar),
-    ])
-    if (!backlink.ok) errors.push(backlink.message)
-    if (!avatar.ok) errors.push(avatar.message)
+    const friend = friends.find((item) => new URL(item.url).hostname.toLowerCase() === fileName.slice(0, -'.json'.length))
+    if (!friend) {
+      errors.push(`没有找到 ${changedPath} 对应的有效友链`)
+    } else {
+      const [backlink, avatar] = await Promise.all([
+        verifyBacklink(friend.url),
+        verifyAvatar(friend.avatar),
+      ])
+      if (!backlink.ok) errors.push(backlink.message)
+      if (!avatar.ok) errors.push(avatar.message)
+    }
   }
 }
 
