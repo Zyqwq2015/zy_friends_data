@@ -1,0 +1,111 @@
+name: Validate friend link
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, edited, ready_for_review]
+
+permissions: {}
+
+concurrency:
+  group: friend-link-submissions
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Checkout trusted base branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Fetch pull request JSON
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: git fetch --no-tags origin "pull/${PR_NUMBER}/head:pr-head"
+
+      - name: Isolate submitted files
+        run: git worktree add --detach .pr-head pr-head
+
+      - name: Determine changed files
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          git merge-base "origin/${BASE_REF}" pr-head > merge-base.txt
+          git diff --name-status "$(cat merge-base.txt)" pr-head > changed-files.txt
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Run validator tests
+        run: npm test
+
+      - name: Validate submission
+        env:
+          VALIDATION_REPORT: validation-report.md
+        run: node scripts/validate-pr.mjs .pr-head/data changed-files.txt
+
+      - name: Comment validation result
+        if: always() && hashFiles('validation-report.md') != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: gh pr comment "$PR_NUMBER" --body-file validation-report.md
+
+  add-friend:
+    needs: validate
+    if: ${{ needs.validate.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Checkout base branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Merge validated pull request
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: gh pr merge "$PR_NUMBER" --squash --match-head-commit "$HEAD_SHA"
+
+      - name: Checkout merged base branch
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          git fetch origin "${BASE_REF}"
+          git checkout -B "${BASE_REF}" "origin/${BASE_REF}"
+
+      - name: Build public index
+        run: node scripts/build-index.mjs data friends.json
+
+      - name: Commit public index
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add friends.json
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "chore: rebuild friends index"
+          git push origin "HEAD:${BASE_REF}"
+
+      - name: Comment completion
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: gh pr comment "$PR_NUMBER" --body "友链已通过自动检查并完成合并。站点通常会在 5 分钟内更新。"
